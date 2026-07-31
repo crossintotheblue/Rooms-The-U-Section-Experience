@@ -6,6 +6,10 @@ import despawnAsset from "@/assets/despawn.wav.asset.json";
 import ambianceAsset from "@/assets/u25-ambiance.mp3.asset.json";
 import jumpscareGif from "@/assets/jumpscare.gif.asset.json";
 import jumpscareSfx from "@/assets/jumpscare-new.mp3.asset.json";
+import u60FaceAsset from "@/assets/u60-face.gif.asset.json";
+import u60AmbianceAsset from "@/assets/u60-ambiance.mp3.asset.json";
+import u60ScreamAsset from "@/assets/u60-scream.mp3.asset.json";
+import u60SpawnAsset from "@/assets/u60-spawn.mp3.asset.json";
 
 type RoomType = "empty" | "plant" | "lockers" | "threeLocker" | "metal";
 
