@@ -798,68 +798,64 @@ export default function DoorsGame() {
       }
 
       // Entity motion
-      if (entityState === "active") {
-        entityZ -= (ROOM_W * 2) * dt; // 2 rooms per second
-        entityGroup.position.z = entityZ;
-        entityGroup.position.y = 1.8;
-        // Always face player (billboard)
-        entity.lookAt(camera.position.x, entityGroup.position.y, camera.position.z);
+      for (const rig of rigs) {
+        if (rig.state !== "active") continue;
+        rig.z -= ROOM_W * rig.roomsPerSec * dt;
+        rig.group.position.z = rig.z;
+        rig.group.position.y = 1.8;
+        rig.face.lookAt(camera.position.x, rig.group.position.y, camera.position.z);
+        if (rig.ring) {
+          rig.ring.rotation.z += dt * 2.5;
+          rig.ring.rotation.x = Math.sin(performance.now() * 0.002) * 0.6;
+          rig.ring.lookAt(camera.position.x, rig.group.position.y, camera.position.z);
+        }
+        if (rig.name === "U-60" && gifImg.complete && gifImg.naturalWidth > 0) {
+          gifCtx.clearRect(0, 0, gifCanvas.width, gifCanvas.height);
+          gifCtx.drawImage(gifImg, 0, 0, gifCanvas.width, gifCanvas.height);
+          u60Tex.needsUpdate = true;
+        }
 
-        // Particles: spawn new, update existing
-        const posAttr = particleGeo.getAttribute("position") as THREE.BufferAttribute;
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-          particleLife[i] -= dt;
-          if (particleLife[i] <= 0) {
-            particleLife[i] = 0.6 + Math.random() * 0.8;
-            posAttr.setXYZ(
-              i,
-              entityGroup.position.x + (Math.random() - 0.5) * 1.5,
-              entityGroup.position.y + (Math.random() - 0.5) * 2.5,
-              entityZ + (Math.random() - 0.5) * 0.5
-            );
-            particleVel[i].set(
-              (Math.random() - 0.5) * 0.5,
-              (Math.random() - 0.2) * 0.8,
-              1.5 + Math.random() * 1.5
-            );
-          } else {
-            posAttr.setXYZ(
-              i,
-              posAttr.getX(i) + particleVel[i].x * dt,
-              posAttr.getY(i) + particleVel[i].y * dt,
-              posAttr.getZ(i) + particleVel[i].z * dt
-            );
+        for (const s of rig.systems) {
+          updateParticles(s, dt, rig.group.position.x, rig.group.position.y, rig.z);
+        }
+
+        // Approach scream (~10 seconds out) — plays fully even after despawn
+        if (rig.screamUrl && !rig.screamPlayed) {
+          const distance = rig.z - camera.position.z;
+          const eta = distance / (ROOM_W * rig.roomsPerSec);
+          if (eta <= 10) {
+            rig.screamPlayed = true;
+            try {
+              const scream = new Audio(rig.screamUrl);
+              scream.volume = 1.0;
+              scream.play().catch(() => {});
+            } catch { /* noop */ }
           }
         }
-        posAttr.needsUpdate = true;
 
-        const targetDoorZ = -(entityTargetRoom * ROOM_W + ROOM_W); // front door of current room
-        if (!hidingState && !gameOverRef.current && entityZ <= camera.position.z + 1.5 && entityZ >= camera.position.z - 1.5) {
+        const targetDoorZ = -(rig.targetRoom * ROOM_W + ROOM_W);
+        if (!hidingState && !gameOverRef.current && rig.z <= camera.position.z + 1.5 && rig.z >= camera.position.z - 1.5) {
           gameOverRef.current = true;
           setGameOver(true);
           setJumpscare(true);
-          try { ambianceAudio.pause(); } catch { /* noop */ }
+          for (const other of rigs) { try { other.ambiance.pause(); } catch { /* noop */ } }
           try { jumpscareAudio.currentTime = 0; jumpscareAudio.play().catch(() => {}); } catch { /* noop */ }
           setTimeout(() => { setJumpscare(false); setShowRespawn(true); }, 1000);
-          entityState = "cooldown";
-          entityGroup.visible = false;
-          particles.visible = false;
-          setEntityWarning(false);
+          rig.state = "cooldown";
+          setRigVisible(rig, false);
         }
-        if (entityState === "active" && entityZ <= targetDoorZ) {
-          entityState = "cooldown";
-          hasEncountered = true;
-          spawnChance = 0.0;
-          entityGroup.visible = false;
-          particles.visible = false;
-          setEntityWarning(false);
-          try { ambianceAudio.pause(); ambianceAudio.currentTime = 0; } catch { /* noop */ }
+        if (rig.state === "active" && rig.z <= targetDoorZ) {
+          rig.state = "cooldown";
+          rig.hasEncountered = true;
+          rig.spawnChance = 0;
+          setRigVisible(rig, false);
+          try { rig.ambiance.pause(); rig.ambiance.currentTime = 0; } catch { /* noop */ }
           try {
             const d = new Audio(despawnAsset.url);
             d.volume = 0.9;
             d.play().catch(() => {});
           } catch { /* noop */ }
-          setTimeout(() => { entityState = "idle"; }, 3000);
+          setTimeout(() => { rig.state = "idle"; }, 3000);
         }
       }
 
