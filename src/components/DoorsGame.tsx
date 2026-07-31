@@ -926,11 +926,6 @@ export default function DoorsGame() {
           HIDING
         </div>
       )}
-      {entityWarning && !gameOver && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 text-red-500 font-mono text-2xl font-bold animate-pulse drop-shadow-[0_2px_2px_rgba(0,0,0,0.9)]">
-          U-25 IS COMING — HIDE!
-        </div>
-      )}
       <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/70 text-xl">
         +
       </div>
@@ -939,8 +934,19 @@ export default function DoorsGame() {
           {prompt}
         </div>
       )}
+      {isMobile && !gameOver && (
+        <>
+          <Joystick moveRef={moveRef} />
+          {nearHide && (
+            <HoldButton
+              label={hiding ? "LEAVE" : "HIDE"}
+              onHold={() => interactRef.current()}
+            />
+          )}
+        </>
+      )}
       {gameOver && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 bg-black/80 text-red-500 font-mono text-5xl font-bold">
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-8 bg-black text-red-500 font-mono text-5xl font-bold">
           YOU DIED
           {showRespawn && (
             <button
@@ -959,9 +965,125 @@ export default function DoorsGame() {
           className="pointer-events-none absolute inset-0 w-full h-full object-cover z-50"
         />
       )}
-      <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-white/70 font-mono text-xs text-center">
-        WASD move · Shift sprint · Click &amp; drag to look · E to open doors / hide
-      </div>
+      {!isMobile && (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-white/70 font-mono text-xs text-center">
+          WASD move · Shift sprint · Click &amp; drag to look · E to open doors / hide
+        </div>
+      )}
+      {!device && (
+        <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-10 bg-black">
+          <h1 className="text-white font-mono text-3xl md:text-4xl font-bold text-center px-6">
+            What device are you playing on?
+          </h1>
+          <div className="flex gap-6">
+            <button
+              onClick={() => setDevice("mobile")}
+              className="px-10 py-4 border-2 border-white/60 text-white font-mono text-xl rounded hover:bg-white hover:text-black transition-colors"
+            >
+              Mobile
+            </button>
+            <button
+              onClick={() => setDevice("computer")}
+              className="px-10 py-4 border-2 border-white/60 text-white font-mono text-xl rounded hover:bg-white hover:text-black transition-colors"
+            >
+              Computer
+            </button>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function Joystick({ moveRef }: { moveRef: React.MutableRefObject<{ x: number; y: number }> }) {
+  const baseRef = useRef<HTMLDivElement>(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const touchId = useRef<number | null>(null);
+  const RADIUS = 56;
+
+  const update = (cx: number, cy: number) => {
+    const el = baseRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    let dx = cx - (r.left + r.width / 2);
+    let dy = cy - (r.top + r.height / 2);
+    const len = Math.hypot(dx, dy);
+    if (len > RADIUS) {
+      dx = (dx / len) * RADIUS;
+      dy = (dy / len) * RADIUS;
+    }
+    setKnob({ x: dx, y: dy });
+    moveRef.current = { x: dx / RADIUS, y: -dy / RADIUS };
+  };
+
+  const reset = () => {
+    touchId.current = null;
+    setKnob({ x: 0, y: 0 });
+    moveRef.current = { x: 0, y: 0 };
+  };
+
+  return (
+    <div
+      ref={baseRef}
+      className="absolute bottom-8 left-8 h-32 w-32 rounded-full border-2 border-white/40 bg-white/10 touch-none z-30"
+      onTouchStart={(e) => {
+        e.stopPropagation();
+        if (touchId.current !== null) return;
+        const t = e.changedTouches[0];
+        touchId.current = t.identifier;
+        update(t.clientX, t.clientY);
+      }}
+      onTouchMove={(e) => {
+        e.stopPropagation();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const t = e.changedTouches[i];
+          if (t.identifier === touchId.current) update(t.clientX, t.clientY);
+        }
+      }}
+      onTouchEnd={(e) => {
+        e.stopPropagation();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === touchId.current) reset();
+        }
+      }}
+      onTouchCancel={reset}
+    >
+      <div
+        className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/70"
+        style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
+      />
+    </div>
+  );
+}
+
+function HoldButton({ label, onHold }: { label: string; onHold: () => void }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pressing, setPressing] = useState(false);
+
+  const start = () => {
+    setPressing(true);
+    timer.current = setTimeout(() => {
+      setPressing(false);
+      onHold();
+    }, 200);
+  };
+  const cancel = () => {
+    setPressing(false);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+
+  return (
+    <button
+      onTouchStart={(e) => { e.stopPropagation(); start(); }}
+      onTouchEnd={(e) => { e.stopPropagation(); cancel(); }}
+      onTouchCancel={cancel}
+      className={`absolute bottom-12 right-8 z-30 h-24 w-24 rounded-full border-2 border-white/60 font-mono text-sm touch-none ${
+        pressing ? "bg-white text-black" : "bg-black/50 text-white"
+      }`}
+    >
+      {label}
+      <span className="block text-[10px] opacity-70">hold</span>
+    </button>
   );
 }
