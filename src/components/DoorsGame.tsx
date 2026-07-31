@@ -6,6 +6,10 @@ import despawnAsset from "@/assets/despawn.wav.asset.json";
 import ambianceAsset from "@/assets/u25-ambiance.mp3.asset.json";
 import jumpscareGif from "@/assets/jumpscare.gif.asset.json";
 import jumpscareSfx from "@/assets/jumpscare-new.mp3.asset.json";
+import u60FaceAsset from "@/assets/u60-face.gif.asset.json";
+import u60AmbianceAsset from "@/assets/u60-ambiance.mp3.asset.json";
+import u60ScreamAsset from "@/assets/u60-scream.mp3.asset.json";
+import u60SpawnAsset from "@/assets/u60-spawn.mp3.asset.json";
 
 type RoomType = "empty" | "plant" | "lockers" | "threeLocker" | "metal";
 
@@ -117,12 +121,20 @@ export default function DoorsGame() {
   const [currentRoom, setCurrentRoom] = useState(1);
   const [hiding, setHiding] = useState(false);
   const [prompt, setPrompt] = useState<string>("");
-  const [entityWarning, setEntityWarning] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [jumpscare, setJumpscare] = useState(false);
   const [showRespawn, setShowRespawn] = useState(false);
+  const [device, setDevice] = useState<"mobile" | "computer" | null>(null);
+  const [nearHide, setNearHide] = useState(false);
+  const isMobile = device === "mobile";
+  const moveRef = useRef({ x: 0, y: 0 });
+  const interactRef = useRef<() => void>(() => {});
 
   useEffect(() => {
+    if (!device) return;
+    // Preload jumpscare media so it appears instantly
+    const preloadImg = new Image();
+    preloadImg.src = jumpscareGif.url;
     const mount = mountRef.current!;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0a);
@@ -363,100 +375,239 @@ export default function DoorsGame() {
     }
     ensureRoomsUpTo(4);
 
-    // === U-25 Entity ===
+    // === Entities (U-25 & U-60) ===
+    const jumpscareAudio = new Audio(jumpscareSfx.url);
+    jumpscareAudio.volume = 1.0;
+    jumpscareAudio.preload = "auto";
+    jumpscareAudio.load();
+
+    function makeGlowTexture(inner: string, mid: string, outer: string) {
+      const gc = document.createElement("canvas");
+      gc.width = gc.height = 256;
+      const gx = gc.getContext("2d")!;
+      const g = gx.createRadialGradient(128, 128, 10, 128, 128, 128);
+      g.addColorStop(0, inner);
+      g.addColorStop(0.4, mid);
+      g.addColorStop(1, outer);
+      gx.fillStyle = g;
+      gx.fillRect(0, 0, 256, 256);
+      return new THREE.CanvasTexture(gc);
+    }
+
+    interface ParticleSys {
+      pts: THREE.Points;
+      geo: THREE.BufferGeometry;
+      vel: THREE.Vector3[];
+      life: Float32Array;
+      count: number;
+      spread: number;
+      speed: number;
+    }
+
+    function makeParticles(count: number, color: number, size: number, spread: number, speed: number): ParticleSys {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+      const mat = new THREE.PointsMaterial({
+        color,
+        size,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const pts = new THREE.Points(geo, mat);
+      pts.visible = false;
+      scene.add(pts);
+      const vel: THREE.Vector3[] = [];
+      for (let i = 0; i < count; i++) vel.push(new THREE.Vector3());
+      return { pts, geo, vel, life: new Float32Array(count), count, spread, speed };
+    }
+
+    function updateParticles(p: ParticleSys, dt: number, cx: number, cy: number, cz: number) {
+      const attr = p.geo.getAttribute("position") as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        p.life[i] -= dt;
+        if (p.life[i] <= 0) {
+          p.life[i] = 0.6 + Math.random() * 0.8;
+          attr.setXYZ(
+            i,
+            cx + (Math.random() - 0.5) * p.spread,
+            cy + (Math.random() - 0.5) * (p.spread * 1.6),
+            cz + (Math.random() - 0.5) * 0.6
+          );
+          p.vel[i].set(
+            (Math.random() - 0.5) * p.speed * 0.4,
+            (Math.random() - 0.2) * p.speed * 0.6,
+            p.speed * (0.8 + Math.random())
+          );
+        } else {
+          attr.setXYZ(
+            i,
+            attr.getX(i) + p.vel[i].x * dt,
+            attr.getY(i) + p.vel[i].y * dt,
+            attr.getZ(i) + p.vel[i].z * dt
+          );
+        }
+      }
+      attr.needsUpdate = true;
+    }
+
+    interface EntityRig {
+      name: string;
+      minRoom: number;
+      roomsPerSec: number;
+      group: THREE.Group;
+      face: THREE.Mesh;
+      ring?: THREE.Mesh;
+      systems: ParticleSys[];
+      state: "idle" | "active" | "cooldown";
+      z: number;
+      targetRoom: number;
+      spawnChance: number;
+      hasEncountered: boolean;
+      screamPlayed: boolean;
+      spawnAudio: HTMLAudioElement;
+      ambiance: HTMLAudioElement;
+      screamUrl?: string;
+      updateTexture?: () => void;
+    }
+
+    // --- U-25 ---
     const faceTex = new THREE.TextureLoader().load(faceAsset.url);
     faceTex.colorSpace = THREE.SRGBColorSpace;
-    const entityGroup = new THREE.Group();
-    entityGroup.visible = false;
-    scene.add(entityGroup);
 
-    const entityMat = new THREE.MeshBasicMaterial({ map: faceTex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide });
-    const entity = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 3.2), entityMat);
-    entityGroup.add(entity);
-
-    // Cyan glow halo behind the face
-    const glowCanvas = document.createElement("canvas");
-    glowCanvas.width = glowCanvas.height = 256;
-    const gctx = glowCanvas.getContext("2d")!;
-    const grad = gctx.createRadialGradient(128, 128, 10, 128, 128, 128);
-    grad.addColorStop(0, "rgba(0,220,255,0.9)");
-    grad.addColorStop(0.4, "rgba(0,160,255,0.35)");
-    grad.addColorStop(1, "rgba(0,120,255,0)");
-    gctx.fillStyle = grad;
-    gctx.fillRect(0, 0, 256, 256);
-    const glowTex = new THREE.CanvasTexture(glowCanvas);
-    const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(6, 6),
-      new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    const u25Group = new THREE.Group();
+    u25Group.visible = false;
+    scene.add(u25Group);
+    const u25Face = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.2, 3.2),
+      new THREE.MeshBasicMaterial({ map: faceTex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide })
     );
-    glow.position.z = -0.05;
-    entity.add(glow);
+    u25Group.add(u25Face);
+    const u25Glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(6, 6),
+      new THREE.MeshBasicMaterial({
+        map: makeGlowTexture("rgba(0,220,255,0.9)", "rgba(0,160,255,0.35)", "rgba(0,120,255,0)"),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    u25Glow.position.z = -0.05;
+    u25Face.add(u25Glow);
+    u25Group.add(new THREE.PointLight(0x33ccff, 3, 12, 2));
 
-    const entityLight = new THREE.PointLight(0x33ccff, 3, 12, 2);
-    entityGroup.add(entityLight);
+    // --- U-60 (animated GIF face) ---
+    const gifImg = document.createElement("img");
+    gifImg.src = u60FaceAsset.url;
+    gifImg.style.cssText = "position:fixed;left:-9999px;top:0;width:64px;height:64px;opacity:0.01;pointer-events:none";
+    document.body.appendChild(gifImg);
+    const gifCanvas = document.createElement("canvas");
+    gifCanvas.width = gifCanvas.height = 320;
+    const gifCtx = gifCanvas.getContext("2d")!;
+    const u60Tex = new THREE.CanvasTexture(gifCanvas);
+    u60Tex.colorSpace = THREE.SRGBColorSpace;
 
-    // Blue particles trailing the entity
-    const PARTICLE_COUNT = 240;
-    const particleGeo = new THREE.BufferGeometry();
-    const particlePos = new Float32Array(PARTICLE_COUNT * 3);
-    const particleVel: THREE.Vector3[] = [];
-    const particleLife = new Float32Array(PARTICLE_COUNT);
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      particlePos[i * 3] = 0;
-      particlePos[i * 3 + 1] = 0;
-      particlePos[i * 3 + 2] = 0;
-      particleVel.push(new THREE.Vector3());
-      particleLife[i] = 0;
+    const u60Group = new THREE.Group();
+    u60Group.visible = false;
+    scene.add(u60Group);
+    const u60Face = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.8, 3.8),
+      new THREE.MeshBasicMaterial({ map: u60Tex, transparent: true, alphaTest: 0.05, side: THREE.DoubleSide })
+    );
+    u60Group.add(u60Face);
+    const u60Glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(9, 9),
+      new THREE.MeshBasicMaterial({
+        map: makeGlowTexture("rgba(90,140,255,0.95)", "rgba(30,60,255,0.45)", "rgba(0,20,180,0)"),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    u60Glow.position.z = -0.05;
+    u60Face.add(u60Glow);
+    u60Group.add(new THREE.PointLight(0x3355ff, 6, 20, 2));
+    const u60Ring = new THREE.Mesh(
+      new THREE.TorusGeometry(2.6, 0.09, 8, 48),
+      new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    u60Group.add(u60Ring);
+
+    const rigs: EntityRig[] = [
+      {
+        name: "U-25",
+        minRoom: 15,
+        roomsPerSec: 2,
+        group: u25Group,
+        face: u25Face,
+        systems: [makeParticles(240, 0x33ccff, 0.22, 1.5, 1.5)],
+        state: "idle",
+        z: 0,
+        targetRoom: 0,
+        spawnChance: 0,
+        hasEncountered: false,
+        screamPlayed: false,
+        spawnAudio: new Audio(spawnAsset.url),
+        ambiance: new Audio(ambianceAsset.url),
+      },
+      {
+        name: "U-60",
+        minRoom: 24,
+        roomsPerSec: 4,
+        group: u60Group,
+        face: u60Face,
+        ring: u60Ring,
+        systems: [
+          makeParticles(700, 0x2244ff, 0.2, 2.2, 3.0),
+          makeParticles(260, 0x88bbff, 0.42, 3.4, 5.0),
+          makeParticles(160, 0x00ffff, 0.12, 1.0, 1.2),
+        ],
+        state: "idle",
+        z: 0,
+        targetRoom: 0,
+        spawnChance: 0,
+        hasEncountered: false,
+        screamPlayed: false,
+        spawnAudio: new Audio(u60SpawnAsset.url),
+        ambiance: new Audio(u60AmbianceAsset.url),
+        screamUrl: u60ScreamAsset.url,
+      },
+    ];
+
+    for (const r of rigs) {
+      r.spawnAudio.volume = 0.9;
+      r.ambiance.volume = 0.7;
+      r.ambiance.loop = true;
     }
-    particleGeo.setAttribute("position", new THREE.BufferAttribute(particlePos, 3));
-    const particleMat = new THREE.PointsMaterial({
-      color: 0x33ccff,
-      size: 0.22,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const particles = new THREE.Points(particleGeo, particleMat);
-    particles.visible = false;
-    scene.add(particles);
 
-    const spawnAudio = new Audio(spawnAsset.url);
-    const despawnAudio = new Audio(despawnAsset.url);
-    despawnAudio.volume = 0.9;
-    const ambianceAudio = new Audio(ambianceAsset.url);
-    const jumpscareAudio = new Audio(jumpscareSfx.url);
-    spawnAudio.volume = 0.9;
-    ambianceAudio.volume = 0.7;
-    ambianceAudio.loop = true;
-    jumpscareAudio.volume = 1.0;
-
-    let entityState: "idle" | "active" | "cooldown" = "idle";
-    let entityZ = 0;
-    let entityTargetRoom = 0;
-    let spawnChance = 0.0;
-    let hasEncountered = false;
+    function setRigVisible(r: EntityRig, v: boolean) {
+      r.group.visible = v;
+      for (const s of r.systems) s.pts.visible = v;
+    }
 
     function trySpawnEntity(playerRoomIdx: number) {
-      if (entityState !== "idle") return;
-      if (playerRoomIdx < 15) return;
-      const cap = hasEncountered ? 1.0 : 0.30;
-      const guaranteed = !hasEncountered && spawnChance >= 0.30;
-      if (guaranteed || Math.random() < spawnChance) {
-        entityState = "active";
-        entityTargetRoom = playerRoomIdx;
-        entityZ = 0;
-        entityGroup.position.set(0, 1.8, entityZ);
-        entityGroup.visible = true;
-        particles.visible = true;
-        setEntityWarning(true);
-        spawnAudio.currentTime = 0;
-        spawnAudio.play().catch(() => {});
-        try { ambianceAudio.currentTime = 0; ambianceAudio.play().catch(() => {}); } catch { /* noop */ }
-        spawnChance = 0.0;
-      } else {
-        const step = hasEncountered ? 0.001 : 0.01;
-        spawnChance = Math.min(cap, spawnChance + step);
+      const anyActive = rigs.some((r) => r.state === "active");
+      if (anyActive) return;
+      for (const r of rigs) {
+        if (r.state !== "idle") continue;
+        if (playerRoomIdx < r.minRoom) continue;
+        const cap = r.hasEncountered ? 1.0 : 0.3;
+        const guaranteed = !r.hasEncountered && r.spawnChance >= 0.3;
+        if (guaranteed || Math.random() < r.spawnChance) {
+          r.state = "active";
+          r.targetRoom = playerRoomIdx;
+          r.z = 0;
+          r.screamPlayed = false;
+          r.group.position.set(0, 1.8, 0);
+          setRigVisible(r, true);
+          r.spawnAudio.currentTime = 0;
+          r.spawnAudio.play().catch(() => {});
+          try { r.ambiance.currentTime = 0; r.ambiance.play().catch(() => {}); } catch { /* noop */ }
+          r.spawnChance = 0;
+          return;
+        }
+        r.spawnChance = Math.min(cap, r.spawnChance + (r.hasEncountered ? 0.001 : 0.01));
       }
     }
 
@@ -481,12 +632,52 @@ export default function DoorsGame() {
     const onLockChange = () => { isLocked = document.pointerLockElement === renderer.domElement; };
     document.addEventListener("pointerlockchange", onLockChange);
     const onMouseDown = () => {
+      if (device === "mobile") return;
       dragging = true;
       try { renderer.domElement.requestPointerLock?.(); } catch { /* noop */ }
     };
     const onMouseUp = () => { dragging = false; };
     renderer.domElement.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
+
+    // --- Mobile look: only touches that land on the canvas rotate the camera ---
+    let lookTouchId: number | null = null;
+    let lastTX = 0;
+    let lastTY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      if (lookTouchId !== null) return;
+      const t = e.changedTouches[0];
+      lookTouchId = t.identifier;
+      lastTX = t.clientX;
+      lastTY = t.clientY;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier !== lookTouchId) continue;
+        const dx = t.clientX - lastTX;
+        const dy = t.clientY - lastTY;
+        lastTX = t.clientX;
+        lastTY = t.clientY;
+        euler.setFromQuaternion(camera.quaternion);
+        euler.y -= dx * 0.005;
+        euler.x -= dy * 0.005;
+        euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
+        camera.quaternion.setFromEuler(euler);
+      }
+      e.preventDefault();
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === lookTouchId) lookTouchId = null;
+      }
+    };
+    if (device === "mobile") {
+      renderer.domElement.addEventListener("touchstart", onTouchStart, { passive: false });
+      renderer.domElement.addEventListener("touchmove", onTouchMove, { passive: false });
+      renderer.domElement.addEventListener("touchend", onTouchEnd);
+      renderer.domElement.addEventListener("touchcancel", onTouchEnd);
+    }
 
     let hidingState: { room: Room; spotIdx: number; savedPos: THREE.Vector3 } | null = null;
     const tryInteract = () => {
@@ -527,6 +718,7 @@ export default function DoorsGame() {
       if (e.code === "KeyE") tryInteract();
     };
     window.addEventListener("keydown", onKeyPress);
+    interactRef.current = tryInteract;
 
     const velocity = new THREE.Vector3();
     const playerRadius = 0.35;
@@ -577,6 +769,11 @@ export default function DoorsGame() {
         if (keys["KeyS"]) velocity.addScaledVector(forward, -1);
         if (keys["KeyD"]) velocity.add(right);
         if (keys["KeyA"]) velocity.addScaledVector(right, -1);
+        const mv = moveRef.current;
+        if (mv.x !== 0 || mv.y !== 0) {
+          velocity.addScaledVector(forward, mv.y);
+          velocity.addScaledVector(right, mv.x);
+        }
         if (velocity.lengthSq() > 0) velocity.normalize().multiplyScalar(speed);
         camera.position.add(velocity);
         camera.position.y = 1.7;
@@ -601,93 +798,97 @@ export default function DoorsGame() {
       }
 
       // Entity motion
-      if (entityState === "active") {
-        entityZ -= (ROOM_W * 2) * dt; // 2 rooms per second
-        entityGroup.position.z = entityZ;
-        entityGroup.position.y = 1.8;
-        // Always face player (billboard)
-        entity.lookAt(camera.position.x, entityGroup.position.y, camera.position.z);
+      for (const rig of rigs) {
+        if (rig.state !== "active") continue;
+        rig.z -= ROOM_W * rig.roomsPerSec * dt;
+        rig.group.position.z = rig.z;
+        rig.group.position.y = 1.8;
+        rig.face.lookAt(camera.position.x, rig.group.position.y, camera.position.z);
+        if (rig.ring) {
+          rig.ring.rotation.z += dt * 2.5;
+          rig.ring.rotation.x = Math.sin(performance.now() * 0.002) * 0.6;
+          rig.ring.lookAt(camera.position.x, rig.group.position.y, camera.position.z);
+        }
+        if (rig.name === "U-60" && gifImg.complete && gifImg.naturalWidth > 0) {
+          gifCtx.clearRect(0, 0, gifCanvas.width, gifCanvas.height);
+          gifCtx.drawImage(gifImg, 0, 0, gifCanvas.width, gifCanvas.height);
+          u60Tex.needsUpdate = true;
+        }
 
-        // Particles: spawn new, update existing
-        const posAttr = particleGeo.getAttribute("position") as THREE.BufferAttribute;
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-          particleLife[i] -= dt;
-          if (particleLife[i] <= 0) {
-            particleLife[i] = 0.6 + Math.random() * 0.8;
-            posAttr.setXYZ(
-              i,
-              entityGroup.position.x + (Math.random() - 0.5) * 1.5,
-              entityGroup.position.y + (Math.random() - 0.5) * 2.5,
-              entityZ + (Math.random() - 0.5) * 0.5
-            );
-            particleVel[i].set(
-              (Math.random() - 0.5) * 0.5,
-              (Math.random() - 0.2) * 0.8,
-              1.5 + Math.random() * 1.5
-            );
-          } else {
-            posAttr.setXYZ(
-              i,
-              posAttr.getX(i) + particleVel[i].x * dt,
-              posAttr.getY(i) + particleVel[i].y * dt,
-              posAttr.getZ(i) + particleVel[i].z * dt
-            );
+        for (const s of rig.systems) {
+          updateParticles(s, dt, rig.group.position.x, rig.group.position.y, rig.z);
+        }
+
+        // Approach scream (~10 seconds out) — plays fully even after despawn
+        if (rig.screamUrl && !rig.screamPlayed) {
+          const distance = rig.z - camera.position.z;
+          const eta = distance / (ROOM_W * rig.roomsPerSec);
+          if (eta <= 10) {
+            rig.screamPlayed = true;
+            try {
+              const scream = new Audio(rig.screamUrl);
+              scream.volume = 1.0;
+              scream.play().catch(() => {});
+            } catch { /* noop */ }
           }
         }
-        posAttr.needsUpdate = true;
 
-        const targetDoorZ = -(entityTargetRoom * ROOM_W + ROOM_W); // front door of current room
-        if (!hidingState && !gameOverRef.current && entityZ <= camera.position.z + 1.5 && entityZ >= camera.position.z - 1.5) {
+        const targetDoorZ = -(rig.targetRoom * ROOM_W + ROOM_W);
+        if (!hidingState && !gameOverRef.current && rig.z <= camera.position.z + 1.5 && rig.z >= camera.position.z - 1.5) {
           gameOverRef.current = true;
           setGameOver(true);
           setJumpscare(true);
-          try { ambianceAudio.pause(); } catch { /* noop */ }
+          for (const other of rigs) { try { other.ambiance.pause(); } catch { /* noop */ } }
           try { jumpscareAudio.currentTime = 0; jumpscareAudio.play().catch(() => {}); } catch { /* noop */ }
           setTimeout(() => { setJumpscare(false); setShowRespawn(true); }, 1000);
-          entityState = "cooldown";
-          entityGroup.visible = false;
-          particles.visible = false;
-          setEntityWarning(false);
+          rig.state = "cooldown";
+          setRigVisible(rig, false);
         }
-        if (entityState === "active" && entityZ <= targetDoorZ) {
-          entityState = "cooldown";
-          hasEncountered = true;
-          spawnChance = 0.0;
-          entityGroup.visible = false;
-          particles.visible = false;
-          setEntityWarning(false);
-          try { ambianceAudio.pause(); ambianceAudio.currentTime = 0; } catch { /* noop */ }
+        if (rig.state === "active" && rig.z <= targetDoorZ) {
+          rig.state = "cooldown";
+          rig.hasEncountered = true;
+          rig.spawnChance = 0;
+          setRigVisible(rig, false);
+          try { rig.ambiance.pause(); rig.ambiance.currentTime = 0; } catch { /* noop */ }
           try {
             const d = new Audio(despawnAsset.url);
             d.volume = 0.9;
             d.play().catch(() => {});
           } catch { /* noop */ }
-          setTimeout(() => { entityState = "idle"; }, 3000);
+          setTimeout(() => { rig.state = "idle"; }, 3000);
         }
       }
 
       let promptText = "";
+      let hideAvailable = false;
       const pos = camera.position;
       const room = rooms[roomIdx];
       if (room && !gameOverRef.current) {
         if (hidingState) {
           promptText = "[E] Leave hiding spot";
+          hideAvailable = true;
         } else {
           for (const s of room.hidingSpots) {
             const dx = pos.x - s.pos.x;
             const dz = pos.z - s.pos.z;
             if (Math.sqrt(dx * dx + dz * dz) < 2.0) {
               promptText = s.type === "locker" ? "[E] Hide in locker" : "[E] Hide under table";
+              hideAvailable = true;
               break;
             }
           }
           const doorPos = new THREE.Vector3(0, DOOR_H / 2, room.z - ROOM_W / 2);
-          if (!promptText && !room.doorOpen && pos.distanceTo(doorPos) < 2.5) {
-            promptText = `[E] Open door ${room.index + 2}`;
+          if (!room.doorOpen && pos.distanceTo(doorPos) < 2.5) {
+            if (device === "mobile") {
+              room.doorOpen = true; // proximity opens doors on mobile
+            } else if (!promptText) {
+              promptText = `[E] Open door ${room.index + 2}`;
+            }
           }
         }
       }
-      setPrompt(promptText);
+      setPrompt(device === "mobile" ? "" : promptText);
+      setNearHide(hideAvailable);
 
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
@@ -703,10 +904,16 @@ export default function DoorsGame() {
       document.removeEventListener("pointerlockchange", onLockChange);
       renderer.domElement.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
+      renderer.domElement.removeEventListener("touchstart", onTouchStart);
+      renderer.domElement.removeEventListener("touchmove", onTouchMove);
+      renderer.domElement.removeEventListener("touchend", onTouchEnd);
+      renderer.domElement.removeEventListener("touchcancel", onTouchEnd);
+      for (const r of rigs) { try { r.ambiance.pause(); } catch { /* noop */ } }
+      gifImg.remove();
       renderer.dispose();
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [device]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black">
@@ -719,11 +926,6 @@ export default function DoorsGame() {
           HIDING
         </div>
       )}
-      {entityWarning && !gameOver && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 text-red-500 font-mono text-2xl font-bold animate-pulse drop-shadow-[0_2px_2px_rgba(0,0,0,0.9)]">
-          U-25 IS COMING — HIDE!
-        </div>
-      )}
       <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/70 text-xl">
         +
       </div>
@@ -732,8 +934,19 @@ export default function DoorsGame() {
           {prompt}
         </div>
       )}
+      {isMobile && !gameOver && (
+        <>
+          <Joystick moveRef={moveRef} />
+          {nearHide && (
+            <HoldButton
+              label={hiding ? "LEAVE" : "HIDE"}
+              onHold={() => interactRef.current()}
+            />
+          )}
+        </>
+      )}
       {gameOver && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 bg-black/80 text-red-500 font-mono text-5xl font-bold">
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-8 bg-black text-red-500 font-mono text-5xl font-bold">
           YOU DIED
           {showRespawn && (
             <button
@@ -752,9 +965,125 @@ export default function DoorsGame() {
           className="pointer-events-none absolute inset-0 w-full h-full object-cover z-50"
         />
       )}
-      <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-white/70 font-mono text-xs text-center">
-        WASD move · Shift sprint · Click &amp; drag to look · E to open doors / hide
-      </div>
+      {!isMobile && (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-white/70 font-mono text-xs text-center">
+          WASD move · Shift sprint · Click &amp; drag to look · E to open doors / hide
+        </div>
+      )}
+      {!device && (
+        <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-10 bg-black">
+          <h1 className="text-white font-mono text-3xl md:text-4xl font-bold text-center px-6">
+            What device are you playing on?
+          </h1>
+          <div className="flex gap-6">
+            <button
+              onClick={() => setDevice("mobile")}
+              className="px-10 py-4 border-2 border-white/60 text-white font-mono text-xl rounded hover:bg-white hover:text-black transition-colors"
+            >
+              Mobile
+            </button>
+            <button
+              onClick={() => setDevice("computer")}
+              className="px-10 py-4 border-2 border-white/60 text-white font-mono text-xl rounded hover:bg-white hover:text-black transition-colors"
+            >
+              Computer
+            </button>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function Joystick({ moveRef }: { moveRef: React.MutableRefObject<{ x: number; y: number }> }) {
+  const baseRef = useRef<HTMLDivElement>(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const touchId = useRef<number | null>(null);
+  const RADIUS = 56;
+
+  const update = (cx: number, cy: number) => {
+    const el = baseRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    let dx = cx - (r.left + r.width / 2);
+    let dy = cy - (r.top + r.height / 2);
+    const len = Math.hypot(dx, dy);
+    if (len > RADIUS) {
+      dx = (dx / len) * RADIUS;
+      dy = (dy / len) * RADIUS;
+    }
+    setKnob({ x: dx, y: dy });
+    moveRef.current = { x: dx / RADIUS, y: -dy / RADIUS };
+  };
+
+  const reset = () => {
+    touchId.current = null;
+    setKnob({ x: 0, y: 0 });
+    moveRef.current = { x: 0, y: 0 };
+  };
+
+  return (
+    <div
+      ref={baseRef}
+      className="absolute bottom-8 left-8 h-32 w-32 rounded-full border-2 border-white/40 bg-white/10 touch-none z-30"
+      onTouchStart={(e) => {
+        e.stopPropagation();
+        if (touchId.current !== null) return;
+        const t = e.changedTouches[0];
+        touchId.current = t.identifier;
+        update(t.clientX, t.clientY);
+      }}
+      onTouchMove={(e) => {
+        e.stopPropagation();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const t = e.changedTouches[i];
+          if (t.identifier === touchId.current) update(t.clientX, t.clientY);
+        }
+      }}
+      onTouchEnd={(e) => {
+        e.stopPropagation();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === touchId.current) reset();
+        }
+      }}
+      onTouchCancel={reset}
+    >
+      <div
+        className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/70"
+        style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
+      />
+    </div>
+  );
+}
+
+function HoldButton({ label, onHold }: { label: string; onHold: () => void }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pressing, setPressing] = useState(false);
+
+  const start = () => {
+    setPressing(true);
+    timer.current = setTimeout(() => {
+      setPressing(false);
+      onHold();
+    }, 200);
+  };
+  const cancel = () => {
+    setPressing(false);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+
+  return (
+    <button
+      onTouchStart={(e) => { e.stopPropagation(); start(); }}
+      onTouchEnd={(e) => { e.stopPropagation(); cancel(); }}
+      onTouchCancel={cancel}
+      className={`absolute bottom-12 right-8 z-30 h-24 w-24 rounded-full border-2 border-white/60 font-mono text-sm touch-none ${
+        pressing ? "bg-white text-black" : "bg-black/50 text-white"
+      }`}
+    >
+      {label}
+      <span className="block text-[10px] opacity-70">hold</span>
+    </button>
   );
 }
