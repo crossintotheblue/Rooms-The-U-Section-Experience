@@ -632,12 +632,52 @@ export default function DoorsGame() {
     const onLockChange = () => { isLocked = document.pointerLockElement === renderer.domElement; };
     document.addEventListener("pointerlockchange", onLockChange);
     const onMouseDown = () => {
+      if (device === "mobile") return;
       dragging = true;
       try { renderer.domElement.requestPointerLock?.(); } catch { /* noop */ }
     };
     const onMouseUp = () => { dragging = false; };
     renderer.domElement.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
+
+    // --- Mobile look: only touches that land on the canvas rotate the camera ---
+    let lookTouchId: number | null = null;
+    let lastTX = 0;
+    let lastTY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      if (lookTouchId !== null) return;
+      const t = e.changedTouches[0];
+      lookTouchId = t.identifier;
+      lastTX = t.clientX;
+      lastTY = t.clientY;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier !== lookTouchId) continue;
+        const dx = t.clientX - lastTX;
+        const dy = t.clientY - lastTY;
+        lastTX = t.clientX;
+        lastTY = t.clientY;
+        euler.setFromQuaternion(camera.quaternion);
+        euler.y -= dx * 0.005;
+        euler.x -= dy * 0.005;
+        euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
+        camera.quaternion.setFromEuler(euler);
+      }
+      e.preventDefault();
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === lookTouchId) lookTouchId = null;
+      }
+    };
+    if (device === "mobile") {
+      renderer.domElement.addEventListener("touchstart", onTouchStart, { passive: false });
+      renderer.domElement.addEventListener("touchmove", onTouchMove, { passive: false });
+      renderer.domElement.addEventListener("touchend", onTouchEnd);
+      renderer.domElement.addEventListener("touchcancel", onTouchEnd);
+    }
 
     let hidingState: { room: Room; spotIdx: number; savedPos: THREE.Vector3 } | null = null;
     const tryInteract = () => {
@@ -678,6 +718,7 @@ export default function DoorsGame() {
       if (e.code === "KeyE") tryInteract();
     };
     window.addEventListener("keydown", onKeyPress);
+    interactRef.current = tryInteract;
 
     const velocity = new THREE.Vector3();
     const playerRadius = 0.35;
