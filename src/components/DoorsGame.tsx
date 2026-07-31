@@ -375,100 +375,239 @@ export default function DoorsGame() {
     }
     ensureRoomsUpTo(4);
 
-    // === U-25 Entity ===
+    // === Entities (U-25 & U-60) ===
+    const jumpscareAudio = new Audio(jumpscareSfx.url);
+    jumpscareAudio.volume = 1.0;
+    jumpscareAudio.preload = "auto";
+    jumpscareAudio.load();
+
+    function makeGlowTexture(inner: string, mid: string, outer: string) {
+      const gc = document.createElement("canvas");
+      gc.width = gc.height = 256;
+      const gx = gc.getContext("2d")!;
+      const g = gx.createRadialGradient(128, 128, 10, 128, 128, 128);
+      g.addColorStop(0, inner);
+      g.addColorStop(0.4, mid);
+      g.addColorStop(1, outer);
+      gx.fillStyle = g;
+      gx.fillRect(0, 0, 256, 256);
+      return new THREE.CanvasTexture(gc);
+    }
+
+    interface ParticleSys {
+      pts: THREE.Points;
+      geo: THREE.BufferGeometry;
+      vel: THREE.Vector3[];
+      life: Float32Array;
+      count: number;
+      spread: number;
+      speed: number;
+    }
+
+    function makeParticles(count: number, color: number, size: number, spread: number, speed: number): ParticleSys {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+      const mat = new THREE.PointsMaterial({
+        color,
+        size,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const pts = new THREE.Points(geo, mat);
+      pts.visible = false;
+      scene.add(pts);
+      const vel: THREE.Vector3[] = [];
+      for (let i = 0; i < count; i++) vel.push(new THREE.Vector3());
+      return { pts, geo, vel, life: new Float32Array(count), count, spread, speed };
+    }
+
+    function updateParticles(p: ParticleSys, dt: number, cx: number, cy: number, cz: number) {
+      const attr = p.geo.getAttribute("position") as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        p.life[i] -= dt;
+        if (p.life[i] <= 0) {
+          p.life[i] = 0.6 + Math.random() * 0.8;
+          attr.setXYZ(
+            i,
+            cx + (Math.random() - 0.5) * p.spread,
+            cy + (Math.random() - 0.5) * (p.spread * 1.6),
+            cz + (Math.random() - 0.5) * 0.6
+          );
+          p.vel[i].set(
+            (Math.random() - 0.5) * p.speed * 0.4,
+            (Math.random() - 0.2) * p.speed * 0.6,
+            p.speed * (0.8 + Math.random())
+          );
+        } else {
+          attr.setXYZ(
+            i,
+            attr.getX(i) + p.vel[i].x * dt,
+            attr.getY(i) + p.vel[i].y * dt,
+            attr.getZ(i) + p.vel[i].z * dt
+          );
+        }
+      }
+      attr.needsUpdate = true;
+    }
+
+    interface EntityRig {
+      name: string;
+      minRoom: number;
+      roomsPerSec: number;
+      group: THREE.Group;
+      face: THREE.Mesh;
+      ring?: THREE.Mesh;
+      systems: ParticleSys[];
+      state: "idle" | "active" | "cooldown";
+      z: number;
+      targetRoom: number;
+      spawnChance: number;
+      hasEncountered: boolean;
+      screamPlayed: boolean;
+      spawnAudio: HTMLAudioElement;
+      ambiance: HTMLAudioElement;
+      screamUrl?: string;
+      updateTexture?: () => void;
+    }
+
+    // --- U-25 ---
     const faceTex = new THREE.TextureLoader().load(faceAsset.url);
     faceTex.colorSpace = THREE.SRGBColorSpace;
-    const entityGroup = new THREE.Group();
-    entityGroup.visible = false;
-    scene.add(entityGroup);
 
-    const entityMat = new THREE.MeshBasicMaterial({ map: faceTex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide });
-    const entity = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 3.2), entityMat);
-    entityGroup.add(entity);
-
-    // Cyan glow halo behind the face
-    const glowCanvas = document.createElement("canvas");
-    glowCanvas.width = glowCanvas.height = 256;
-    const gctx = glowCanvas.getContext("2d")!;
-    const grad = gctx.createRadialGradient(128, 128, 10, 128, 128, 128);
-    grad.addColorStop(0, "rgba(0,220,255,0.9)");
-    grad.addColorStop(0.4, "rgba(0,160,255,0.35)");
-    grad.addColorStop(1, "rgba(0,120,255,0)");
-    gctx.fillStyle = grad;
-    gctx.fillRect(0, 0, 256, 256);
-    const glowTex = new THREE.CanvasTexture(glowCanvas);
-    const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(6, 6),
-      new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    const u25Group = new THREE.Group();
+    u25Group.visible = false;
+    scene.add(u25Group);
+    const u25Face = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.2, 3.2),
+      new THREE.MeshBasicMaterial({ map: faceTex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide })
     );
-    glow.position.z = -0.05;
-    entity.add(glow);
+    u25Group.add(u25Face);
+    const u25Glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(6, 6),
+      new THREE.MeshBasicMaterial({
+        map: makeGlowTexture("rgba(0,220,255,0.9)", "rgba(0,160,255,0.35)", "rgba(0,120,255,0)"),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    u25Glow.position.z = -0.05;
+    u25Face.add(u25Glow);
+    u25Group.add(new THREE.PointLight(0x33ccff, 3, 12, 2));
 
-    const entityLight = new THREE.PointLight(0x33ccff, 3, 12, 2);
-    entityGroup.add(entityLight);
+    // --- U-60 (animated GIF face) ---
+    const gifImg = document.createElement("img");
+    gifImg.src = u60FaceAsset.url;
+    gifImg.style.cssText = "position:fixed;left:-9999px;top:0;width:64px;height:64px;opacity:0.01;pointer-events:none";
+    document.body.appendChild(gifImg);
+    const gifCanvas = document.createElement("canvas");
+    gifCanvas.width = gifCanvas.height = 320;
+    const gifCtx = gifCanvas.getContext("2d")!;
+    const u60Tex = new THREE.CanvasTexture(gifCanvas);
+    u60Tex.colorSpace = THREE.SRGBColorSpace;
 
-    // Blue particles trailing the entity
-    const PARTICLE_COUNT = 240;
-    const particleGeo = new THREE.BufferGeometry();
-    const particlePos = new Float32Array(PARTICLE_COUNT * 3);
-    const particleVel: THREE.Vector3[] = [];
-    const particleLife = new Float32Array(PARTICLE_COUNT);
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      particlePos[i * 3] = 0;
-      particlePos[i * 3 + 1] = 0;
-      particlePos[i * 3 + 2] = 0;
-      particleVel.push(new THREE.Vector3());
-      particleLife[i] = 0;
+    const u60Group = new THREE.Group();
+    u60Group.visible = false;
+    scene.add(u60Group);
+    const u60Face = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.8, 3.8),
+      new THREE.MeshBasicMaterial({ map: u60Tex, transparent: true, alphaTest: 0.05, side: THREE.DoubleSide })
+    );
+    u60Group.add(u60Face);
+    const u60Glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(9, 9),
+      new THREE.MeshBasicMaterial({
+        map: makeGlowTexture("rgba(90,140,255,0.95)", "rgba(30,60,255,0.45)", "rgba(0,20,180,0)"),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    u60Glow.position.z = -0.05;
+    u60Face.add(u60Glow);
+    u60Group.add(new THREE.PointLight(0x3355ff, 6, 20, 2));
+    const u60Ring = new THREE.Mesh(
+      new THREE.TorusGeometry(2.6, 0.09, 8, 48),
+      new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    u60Group.add(u60Ring);
+
+    const rigs: EntityRig[] = [
+      {
+        name: "U-25",
+        minRoom: 15,
+        roomsPerSec: 2,
+        group: u25Group,
+        face: u25Face,
+        systems: [makeParticles(240, 0x33ccff, 0.22, 1.5, 1.5)],
+        state: "idle",
+        z: 0,
+        targetRoom: 0,
+        spawnChance: 0,
+        hasEncountered: false,
+        screamPlayed: false,
+        spawnAudio: new Audio(spawnAsset.url),
+        ambiance: new Audio(ambianceAsset.url),
+      },
+      {
+        name: "U-60",
+        minRoom: 24,
+        roomsPerSec: 4,
+        group: u60Group,
+        face: u60Face,
+        ring: u60Ring,
+        systems: [
+          makeParticles(700, 0x2244ff, 0.2, 2.2, 3.0),
+          makeParticles(260, 0x88bbff, 0.42, 3.4, 5.0),
+          makeParticles(160, 0x00ffff, 0.12, 1.0, 1.2),
+        ],
+        state: "idle",
+        z: 0,
+        targetRoom: 0,
+        spawnChance: 0,
+        hasEncountered: false,
+        screamPlayed: false,
+        spawnAudio: new Audio(u60SpawnAsset.url),
+        ambiance: new Audio(u60AmbianceAsset.url),
+        screamUrl: u60ScreamAsset.url,
+      },
+    ];
+
+    for (const r of rigs) {
+      r.spawnAudio.volume = 0.9;
+      r.ambiance.volume = 0.7;
+      r.ambiance.loop = true;
     }
-    particleGeo.setAttribute("position", new THREE.BufferAttribute(particlePos, 3));
-    const particleMat = new THREE.PointsMaterial({
-      color: 0x33ccff,
-      size: 0.22,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const particles = new THREE.Points(particleGeo, particleMat);
-    particles.visible = false;
-    scene.add(particles);
 
-    const spawnAudio = new Audio(spawnAsset.url);
-    const despawnAudio = new Audio(despawnAsset.url);
-    despawnAudio.volume = 0.9;
-    const ambianceAudio = new Audio(ambianceAsset.url);
-    const jumpscareAudio = new Audio(jumpscareSfx.url);
-    spawnAudio.volume = 0.9;
-    ambianceAudio.volume = 0.7;
-    ambianceAudio.loop = true;
-    jumpscareAudio.volume = 1.0;
-
-    let entityState: "idle" | "active" | "cooldown" = "idle";
-    let entityZ = 0;
-    let entityTargetRoom = 0;
-    let spawnChance = 0.0;
-    let hasEncountered = false;
+    function setRigVisible(r: EntityRig, v: boolean) {
+      r.group.visible = v;
+      for (const s of r.systems) s.pts.visible = v;
+    }
 
     function trySpawnEntity(playerRoomIdx: number) {
-      if (entityState !== "idle") return;
-      if (playerRoomIdx < 15) return;
-      const cap = hasEncountered ? 1.0 : 0.30;
-      const guaranteed = !hasEncountered && spawnChance >= 0.30;
-      if (guaranteed || Math.random() < spawnChance) {
-        entityState = "active";
-        entityTargetRoom = playerRoomIdx;
-        entityZ = 0;
-        entityGroup.position.set(0, 1.8, entityZ);
-        entityGroup.visible = true;
-        particles.visible = true;
-        setEntityWarning(true);
-        spawnAudio.currentTime = 0;
-        spawnAudio.play().catch(() => {});
-        try { ambianceAudio.currentTime = 0; ambianceAudio.play().catch(() => {}); } catch { /* noop */ }
-        spawnChance = 0.0;
-      } else {
-        const step = hasEncountered ? 0.001 : 0.01;
-        spawnChance = Math.min(cap, spawnChance + step);
+      const anyActive = rigs.some((r) => r.state === "active");
+      if (anyActive) return;
+      for (const r of rigs) {
+        if (r.state !== "idle") continue;
+        if (playerRoomIdx < r.minRoom) continue;
+        const cap = r.hasEncountered ? 1.0 : 0.3;
+        const guaranteed = !r.hasEncountered && r.spawnChance >= 0.3;
+        if (guaranteed || Math.random() < r.spawnChance) {
+          r.state = "active";
+          r.targetRoom = playerRoomIdx;
+          r.z = 0;
+          r.screamPlayed = false;
+          r.group.position.set(0, 1.8, 0);
+          setRigVisible(r, true);
+          r.spawnAudio.currentTime = 0;
+          r.spawnAudio.play().catch(() => {});
+          try { r.ambiance.currentTime = 0; r.ambiance.play().catch(() => {}); } catch { /* noop */ }
+          r.spawnChance = 0;
+          return;
+        }
+        r.spawnChance = Math.min(cap, r.spawnChance + (r.hasEncountered ? 0.001 : 0.01));
       }
     }
 
