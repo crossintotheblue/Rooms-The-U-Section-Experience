@@ -769,6 +769,11 @@ export default function DoorsGame() {
         if (keys["KeyS"]) velocity.addScaledVector(forward, -1);
         if (keys["KeyD"]) velocity.add(right);
         if (keys["KeyA"]) velocity.addScaledVector(right, -1);
+        const mv = moveRef.current;
+        if (mv.x !== 0 || mv.y !== 0) {
+          velocity.addScaledVector(forward, mv.y);
+          velocity.addScaledVector(right, mv.x);
+        }
         if (velocity.lengthSq() > 0) velocity.normalize().multiplyScalar(speed);
         camera.position.add(velocity);
         camera.position.y = 1.7;
