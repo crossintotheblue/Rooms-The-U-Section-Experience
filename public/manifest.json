@@ -13,12 +13,12 @@
     {
       "src": "https://theusectionexperience.netlify.app/favicon.ico",
       "type": "image/x-icon",
-      "isSquare": false,
-      "isPng": false,
+      "isSquare": true,
+      "isPng": true,
       "isWebp": false,
-      "isJpg": false,
+      "isJpg": true,
       "width": 0,
-      "is512x512": false,
+      "is512x512": true,
       "is256x256": false,
       "is192x192": false
     }
