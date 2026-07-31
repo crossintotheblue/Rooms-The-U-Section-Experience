@@ -860,27 +860,35 @@ export default function DoorsGame() {
       }
 
       let promptText = "";
+      let hideAvailable = false;
       const pos = camera.position;
       const room = rooms[roomIdx];
       if (room && !gameOverRef.current) {
         if (hidingState) {
           promptText = "[E] Leave hiding spot";
+          hideAvailable = true;
         } else {
           for (const s of room.hidingSpots) {
             const dx = pos.x - s.pos.x;
             const dz = pos.z - s.pos.z;
             if (Math.sqrt(dx * dx + dz * dz) < 2.0) {
               promptText = s.type === "locker" ? "[E] Hide in locker" : "[E] Hide under table";
+              hideAvailable = true;
               break;
             }
           }
           const doorPos = new THREE.Vector3(0, DOOR_H / 2, room.z - ROOM_W / 2);
-          if (!promptText && !room.doorOpen && pos.distanceTo(doorPos) < 2.5) {
-            promptText = `[E] Open door ${room.index + 2}`;
+          if (!room.doorOpen && pos.distanceTo(doorPos) < 2.5) {
+            if (device === "mobile") {
+              room.doorOpen = true; // proximity opens doors on mobile
+            } else if (!promptText) {
+              promptText = `[E] Open door ${room.index + 2}`;
+            }
           }
         }
       }
-      setPrompt(promptText);
+      setPrompt(device === "mobile" ? "" : promptText);
+      setNearHide(hideAvailable);
 
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
@@ -896,10 +904,16 @@ export default function DoorsGame() {
       document.removeEventListener("pointerlockchange", onLockChange);
       renderer.domElement.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
+      renderer.domElement.removeEventListener("touchstart", onTouchStart);
+      renderer.domElement.removeEventListener("touchmove", onTouchMove);
+      renderer.domElement.removeEventListener("touchend", onTouchEnd);
+      renderer.domElement.removeEventListener("touchcancel", onTouchEnd);
+      for (const r of rigs) { try { r.ambiance.pause(); } catch { /* noop */ } }
+      gifImg.remove();
       renderer.dispose();
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [device]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black">
