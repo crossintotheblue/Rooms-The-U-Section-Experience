@@ -121,12 +121,20 @@ export default function DoorsGame() {
   const [currentRoom, setCurrentRoom] = useState(1);
   const [hiding, setHiding] = useState(false);
   const [prompt, setPrompt] = useState<string>("");
-  const [entityWarning, setEntityWarning] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [jumpscare, setJumpscare] = useState(false);
   const [showRespawn, setShowRespawn] = useState(false);
+  const [device, setDevice] = useState<"mobile" | "computer" | null>(null);
+  const [nearHide, setNearHide] = useState(false);
+  const isMobile = device === "mobile";
+  const moveRef = useRef({ x: 0, y: 0 });
+  const interactRef = useRef<() => void>(() => {});
 
   useEffect(() => {
+    if (!device) return;
+    // Preload jumpscare media so it appears instantly
+    const preloadImg = new Image();
+    preloadImg.src = jumpscareGif.url;
     const mount = mountRef.current!;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0a);
