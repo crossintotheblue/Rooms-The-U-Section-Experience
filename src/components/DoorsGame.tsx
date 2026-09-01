@@ -711,28 +711,27 @@ export default function DoorsGame() {
         }
       }
 
-      const doorPos = new THREE.Vector3(0, DOOR_H / 2, nearest.z - ROOM_W / 2);
-      if (pos.distanceTo(doorPos) < 2.5) {
-        nearest.doorOpen = true;
-      }
+      const doorRoom = findDoorInRange();
+      if (doorRoom) doorRoom.doorOpen = true;
     };
     const onKeyPress = (e: KeyboardEvent) => {
       if (e.code === "KeyE") tryInteract();
     };
     window.addEventListener("keydown", onKeyPress);
     interactRef.current = tryInteract;
+    const findDoorInRange = (): Room | null => {
+      const pos = camera.position;
+      for (const r of rooms) {
+        if (r.doorOpen) continue;
+        const doorPos = new THREE.Vector3(0, DOOR_H / 2, r.z - ROOM_W / 2);
+        if (pos.distanceTo(doorPos) < 2.5) return r;
+      }
+      return null;
+    };
     openDoorRef.current = () => {
       if (gameOverRef.current || hidingState) return;
-      const pos = camera.position;
-      let nearest: Room | null = null;
-      let nd = Infinity;
-      for (const r of rooms) {
-        const d = Math.abs(r.z - pos.z);
-        if (d < nd) { nd = d; nearest = r; }
-      }
-      if (!nearest) return;
-      const doorPos = new THREE.Vector3(0, DOOR_H / 2, nearest.z - ROOM_W / 2);
-      if (pos.distanceTo(doorPos) < 2.5) nearest.doorOpen = true;
+      const r = findDoorInRange();
+      if (r) r.doorOpen = true;
     };
 
     const velocity = new THREE.Vector3();
@@ -893,10 +892,10 @@ export default function DoorsGame() {
               break;
             }
           }
-          const doorPos = new THREE.Vector3(0, DOOR_H / 2, room.z - ROOM_W / 2);
-          if (!room.doorOpen && pos.distanceTo(doorPos) < 2.5) {
+          const doorRoom = findDoorInRange();
+          if (doorRoom) {
             doorAvailable = true;
-            if (!promptText) promptText = `[E] Open door ${room.index + 2}`;
+            if (!promptText) promptText = `[E] Open door ${doorRoom.index + 2}`;
           }
         }
       }
