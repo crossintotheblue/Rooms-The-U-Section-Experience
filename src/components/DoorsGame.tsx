@@ -711,10 +711,8 @@ export default function DoorsGame() {
         }
       }
 
-      const doorPos = new THREE.Vector3(0, DOOR_H / 2, nearest.z - ROOM_W / 2);
-      if (pos.distanceTo(doorPos) < 2.5) {
-        nearest.doorOpen = true;
-      }
+      const doorRoom = findDoorInRange();
+      if (doorRoom) doorRoom.doorOpen = true;
     };
     const onKeyPress = (e: KeyboardEvent) => {
       if (e.code === "KeyE") tryInteract();
