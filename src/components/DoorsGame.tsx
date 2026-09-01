@@ -957,6 +957,16 @@ export default function DoorsGame() {
               onHold={() => interactRef.current()}
             />
           )}
+          {nearDoor && !hiding && (
+            <button
+              onTouchStart={(e) => { e.stopPropagation(); openDoorRef.current(); }}
+              onClick={(e) => { e.stopPropagation(); openDoorRef.current(); }}
+              className={`absolute ${nearHide ? "bottom-40" : "bottom-12"} right-8 z-30 h-24 w-24 rounded-full border-2 border-blue-400/70 bg-black/50 text-blue-200 font-mono text-sm touch-none active:bg-blue-400 active:text-black`}
+            >
+              OPEN
+              <span className="block text-[10px] opacity-70">door</span>
+            </button>
+          )}
         </>
       )}
       {gameOver && (
