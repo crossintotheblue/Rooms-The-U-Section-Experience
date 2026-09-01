@@ -130,6 +130,7 @@ export default function DoorsGame() {
   const isMobile = device === "mobile";
   const moveRef = useRef({ x: 0, y: 0 });
   const interactRef = useRef<() => void>(() => {});
+  const openDoorRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!device) return;
