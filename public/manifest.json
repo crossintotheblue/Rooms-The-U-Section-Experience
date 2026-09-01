@@ -1,26 +1,17 @@
 {
-  "background_color": "#1800ff",
-  "description": "Rooms: The U Section Experience is a 3D horror game inspired by the classic Rooms theme of games where you must survive monsters by hiding.",
+  "name": "U Section Experience",
+  "short_name": "U Section",
+  "description": "Rooms: The U Section Experience is a 3D horror game where you must survive monsters by hiding.",
   "dir": "ltr",
   "display": "standalone",
-  "name": "U Section Experience",
   "orientation": "any",
   "scope": "/",
-  "short_name": "U Section Experience",
   "start_url": "/",
-  "theme_color": "#1700a2",
+  "background_color": "#000000",
+  "theme_color": "#1a2be0",
   "icons": [
-    {
-      "src": "https://theusectionexperience.netlify.app/favicon.ico",
-      "type": "image/x-icon",
-      "isSquare": true,
-      "isPng": true,
-      "isWebp": false,
-      "isJpg": true,
-      "width": 0,
-      "is512x512": true,
-      "is256x256": false,
-      "is192x192": false
-    }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

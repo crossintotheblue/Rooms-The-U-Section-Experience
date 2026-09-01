@@ -126,9 +126,11 @@ export default function DoorsGame() {
   const [showRespawn, setShowRespawn] = useState(false);
   const [device, setDevice] = useState<"mobile" | "computer" | null>(null);
   const [nearHide, setNearHide] = useState(false);
+  const [nearDoor, setNearDoor] = useState(false);
   const isMobile = device === "mobile";
   const moveRef = useRef({ x: 0, y: 0 });
   const interactRef = useRef<() => void>(() => {});
+  const openDoorRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!device) return;
@@ -719,6 +721,19 @@ export default function DoorsGame() {
     };
     window.addEventListener("keydown", onKeyPress);
     interactRef.current = tryInteract;
+    openDoorRef.current = () => {
+      if (gameOverRef.current || hidingState) return;
+      const pos = camera.position;
+      let nearest: Room | null = null;
+      let nd = Infinity;
+      for (const r of rooms) {
+        const d = Math.abs(r.z - pos.z);
+        if (d < nd) { nd = d; nearest = r; }
+      }
+      if (!nearest) return;
+      const doorPos = new THREE.Vector3(0, DOOR_H / 2, nearest.z - ROOM_W / 2);
+      if (pos.distanceTo(doorPos) < 2.5) nearest.doorOpen = true;
+    };
 
     const velocity = new THREE.Vector3();
     const playerRadius = 0.35;
@@ -861,6 +876,7 @@ export default function DoorsGame() {
 
       let promptText = "";
       let hideAvailable = false;
+      let doorAvailable = false;
       const pos = camera.position;
       const room = rooms[roomIdx];
       if (room && !gameOverRef.current) {
@@ -879,16 +895,14 @@ export default function DoorsGame() {
           }
           const doorPos = new THREE.Vector3(0, DOOR_H / 2, room.z - ROOM_W / 2);
           if (!room.doorOpen && pos.distanceTo(doorPos) < 2.5) {
-            if (device === "mobile") {
-              room.doorOpen = true; // proximity opens doors on mobile
-            } else if (!promptText) {
-              promptText = `[E] Open door ${room.index + 2}`;
-            }
+            doorAvailable = true;
+            if (!promptText) promptText = `[E] Open door ${room.index + 2}`;
           }
         }
       }
       setPrompt(device === "mobile" ? "" : promptText);
       setNearHide(hideAvailable);
+      setNearDoor(doorAvailable);
 
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
@@ -942,6 +956,16 @@ export default function DoorsGame() {
               label={hiding ? "LEAVE" : "HIDE"}
               onHold={() => interactRef.current()}
             />
+          )}
+          {nearDoor && !hiding && (
+            <button
+              onTouchStart={(e) => { e.stopPropagation(); openDoorRef.current(); }}
+              onClick={(e) => { e.stopPropagation(); openDoorRef.current(); }}
+              className={`absolute ${nearHide ? "bottom-40" : "bottom-12"} right-8 z-30 h-24 w-24 rounded-full border-2 border-blue-400/70 bg-black/50 text-blue-200 font-mono text-sm touch-none active:bg-blue-400 active:text-black`}
+            >
+              OPEN
+              <span className="block text-[10px] opacity-70">door</span>
+            </button>
           )}
         </>
       )}

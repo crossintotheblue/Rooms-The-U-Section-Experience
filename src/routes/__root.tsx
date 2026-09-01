@@ -76,10 +76,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" },
       { title: "U Section Experience" },
       { name: "description", content: "Endless Doors is a 3D horror game where players navigate procedurally generated rooms." },
       { name: "author", content: "Lovable" },
+      { name: "theme-color", content: "#1a2be0" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-title", content: "U Section" },
       { property: "og:title", content: "U Section Experience" },
       { property: "og:description", content: "Endless Doors is a 3D horror game where players navigate procedurally generated rooms." },
       { property: "og:type", content: "website" },
@@ -89,10 +94,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:description", content: "Endless Doors is a 3D horror game where players navigate procedurally generated rooms." },
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+      { rel: "stylesheet", href: appCss },
+      { rel: "manifest", href: "/manifest.json" },
+      { rel: "icon", type: "image/png", href: "/favicon.png" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   shellComponent: RootShell,
