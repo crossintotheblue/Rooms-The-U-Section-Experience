@@ -720,6 +720,19 @@ export default function DoorsGame() {
     };
     window.addEventListener("keydown", onKeyPress);
     interactRef.current = tryInteract;
+    openDoorRef.current = () => {
+      if (gameOverRef.current || hidingState) return;
+      const pos = camera.position;
+      let nearest: Room | null = null;
+      let nd = Infinity;
+      for (const r of rooms) {
+        const d = Math.abs(r.z - pos.z);
+        if (d < nd) { nd = d; nearest = r; }
+      }
+      if (!nearest) return;
+      const doorPos = new THREE.Vector3(0, DOOR_H / 2, nearest.z - ROOM_W / 2);
+      if (pos.distanceTo(doorPos) < 2.5) nearest.doorOpen = true;
+    };
 
     const velocity = new THREE.Vector3();
     const playerRadius = 0.35;
