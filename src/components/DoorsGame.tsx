@@ -894,10 +894,10 @@ export default function DoorsGame() {
               break;
             }
           }
-          const doorPos = new THREE.Vector3(0, DOOR_H / 2, room.z - ROOM_W / 2);
-          if (!room.doorOpen && pos.distanceTo(doorPos) < 2.5) {
+          const doorRoom = findDoorInRange();
+          if (doorRoom) {
             doorAvailable = true;
-            if (!promptText) promptText = `[E] Open door ${room.index + 2}`;
+            if (!promptText) promptText = `[E] Open door ${doorRoom.index + 2}`;
           }
         }
       }
